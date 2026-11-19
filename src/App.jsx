@@ -343,8 +343,9 @@ function Analyzer({ onLock, trialEnds }) {
       <header className="z-20 border-b border-slate-200 bg-white/95 backdrop-blur lg:sticky lg:top-0">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-2 px-4 py-2.5">
           <div className="flex items-center gap-3">
-            <img src="/academy-logo.png" alt="Hobknob Co-Living Academy" className="h-10 w-auto sm:h-14" />
-            <span className="hidden border-l border-slate-200 pl-3 text-sm font-bold text-slate-800 sm:inline">Co-Living Deal Analyzer</span>
+            {/* Trimmed copy of the logo (no empty margin), so it reads bigger at the same header height. */}
+            <img src="/academy-logo-header.png" alt="Hobknob Co-Living Academy" className="h-11 w-auto sm:h-16" />
+            <span className="border-l-2 border-slate-200 pl-3 text-[15px] font-extrabold leading-tight tracking-tight text-slate-900 sm:text-2xl">Co-Living Deal Analyzer</span>
           </div>
           <div className="flex flex-wrap items-center gap-1.5">
             {savedMsg && <span className="text-[12px] font-semibold text-emerald-700">{savedMsg}</span>}
