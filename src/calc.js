@@ -296,6 +296,8 @@ function analyzeCore(d, setupAmount, setupMode) {
   // Verdict.
   let verdict;
   if (rentedCount === 0 || grossRent <= 0) verdict = { tone: "none", label: "Add your rooms and rents", note: "Enter the rentable bedrooms (or units) and what each one rents for." };
+  // Every deal needs a price. Without one there is no loan and no real cash flow (Brian, Nov 2026).
+  else if (!(price > 0)) verdict = { tone: "none", label: "Add the purchase price", note: "There is no deal without a price. Enter it in step 6 to see the numbers and the verdict." };
   // Buy & Convert and House Hack need a value: lenders lend on what the house is worth (Brian, Nov 2026).
   else if ((type === "buy" || type === "hack") && !(num(d.arv) > 0)) verdict = { tone: "none", label: "Add the after-repair value", note: "Lenders lend based on what the house is worth once it is done. Enter it in step 6 to see the verdict." };
   // A hard money loan bigger than the house is worth will not get funded.

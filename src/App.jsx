@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Home, Handshake, BedDouble, Info, Save, FilePlus2, FolderOpen, Download, Lock, Trash2,
-  CheckCircle2, AlertTriangle, XCircle, Lightbulb, ChevronDown, ChevronUp, Users, Layers, FileText, ClipboardList, Calculator, MapPin, Search, ExternalLink, Loader2,
+  CheckCircle2, AlertTriangle, XCircle, Lightbulb, ChevronDown, ChevronUp, Users, Layers, FileText, ClipboardList, Calculator, MapPin, Search, ExternalLink, Loader2, HelpCircle, X,
 } from "lucide-react";
 import {
   analyze, whatItTakes, refiPlan, num, fmt$, pct, EXPENSE_ITEMS, CAPEX_ITEMS, FURNISH_RATES, MGMT_PER_ROOM, TARGETS, DEAL_TYPES,
@@ -15,6 +15,11 @@ const BRAND = "#4c9a31"; // the logo green (#6cbb4a), deepened so white button t
 const DRAFT_KEY = "academy.draft.v1";
 const DEALS_KEY = "academy.deals.v1";
 const PASS_KEY = "academy.pass.v1";
+const TRIAL_KEY = "academy.trial.v1";       // trial end time, so an offline visit after it still locks
+const JOIN_URL = "https://www.learncoliving.com";
+// Trial end as shown to people: the last full day, in Eastern time.
+const trialLastDay = (endsAt) => new Date(new Date(endsAt).getTime() - 1).toLocaleDateString("en-US", { timeZone: "America/New_York", month: "long", day: "numeric", year: "numeric" });
+const trialDaysLeft = (endsAt) => Math.max(0, Math.ceil((new Date(endsAt).getTime() - Date.now()) / 86400000));
 const MAX_ROOMS = 15, MAX_UNITS = 10;
 
 const store = {
@@ -168,9 +173,10 @@ function cocView(coc, cashIn, cashFlow, monthsBack) {
 }
 
 // ---------- passcode gate ----------
-function Gate({ onUnlock }) {
+function Gate({ onUnlock, expired }) {
   const [code, setCode] = useState("");
   const [msg, setMsg] = useState("");
+  const [ended, setEnded] = useState(!!expired);
   const [busy, setBusy] = useState(false);
   const submit = async (e) => {
     e.preventDefault();
@@ -178,7 +184,11 @@ function Gate({ onUnlock }) {
     try {
       const r = await fetch("/api/auth", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: code.trim() }) });
       const j = await r.json().catch(() => ({}));
-      if (r.ok && j.ok) { store.set(PASS_KEY, code.trim()); onUnlock(); }
+      if (r.ok && j.ok) {
+        store.set(PASS_KEY, code.trim());
+        if (j.tier === "trial") store.set(TRIAL_KEY, j.endsAt); else store.del(TRIAL_KEY);
+        onUnlock(j);
+      } else if (j.expired) { setEnded(true); setCode(""); setMsg(""); }
       else setMsg(j.error || "That passcode did not work. Check the course for the current one.");
     } catch { setMsg("Could not reach the server. Check your connection and try again."); }
     setBusy(false);
@@ -188,7 +198,14 @@ function Gate({ onUnlock }) {
       <form onSubmit={submit} className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-6 text-center shadow-sm">
         <img src="/academy-logo.png" alt="Hobknob Co-Living Academy" className="mx-auto h-20 w-auto" />
         <h1 className="mt-4 text-lg font-bold text-slate-900">Co-Living Deal Analyzer</h1>
-        <p className="mt-1 text-[13px] text-slate-600">For Hobknob Co-Living Academy students. Enter the passcode from your course.</p>
+        {ended ? (
+          <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-left">
+            <div className="text-[14px] font-bold text-emerald-900">Your free trial has ended</div>
+            <p className="mt-1 text-[12.5px] leading-snug text-emerald-900">Thanks for trying the analyzer. Join the Hobknob Co-Living Academy to keep using it. Any deals you saved are still in this browser.</p>
+            <a href={JOIN_URL} target="_blank" rel="noopener" className="mt-3 block w-full rounded-lg px-4 py-2.5 text-center text-sm font-bold text-white" style={{ background: BRAND }}>Join the Academy</a>
+          </div>
+        ) : null}
+        <p className="mt-3 text-[13px] text-slate-600">{ended ? "Already a student? Enter your course passcode." : "For Hobknob Co-Living Academy students. Enter the passcode from your course."}</p>
         <div className="relative mt-4">
           <Lock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <input className={`${inputCls} pl-9`} type="password" autoComplete="off" autoCapitalize="off" value={code} onChange={(e) => setCode(e.target.value)} placeholder="Passcode" />
@@ -203,23 +220,43 @@ function Gate({ onUnlock }) {
 // ---------- main ----------
 export default function App() {
   const [unlocked, setUnlocked] = useState(null); // null = checking a saved passcode
+  const [trialEnds, setTrialEnds] = useState(null); // ISO time the trial passcode stops working, or null for students
+  const [expired, setExpired] = useState(false);
+  const endTrial = () => { store.del(PASS_KEY); store.del(TRIAL_KEY); setTrialEnds(null); setExpired(true); setUnlocked(false); };
   useEffect(() => {
     const saved = store.get(PASS_KEY, "");
     if (!saved) { setUnlocked(false); return; }
     fetch("/api/auth", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: saved }) })
-      .then((r) => r.json().then((j) => ({ ok: r.ok && j.ok })).catch(() => ({ ok: false })))
-      .then(({ ok }) => { if (!ok) store.del(PASS_KEY); setUnlocked(ok); })
-      .catch(() => setUnlocked(true)); // offline with a passcode that worked before: let them keep working
+      .then((r) => r.json().then((j) => ({ ok: r.ok && j.ok, j })).catch(() => ({ ok: false, j: {} })))
+      .then(({ ok, j }) => {
+        if (j.expired) return endTrial();
+        if (!ok) { store.del(PASS_KEY); store.del(TRIAL_KEY); setUnlocked(false); return; }
+        if (j.tier === "trial") { store.set(TRIAL_KEY, j.endsAt); setTrialEnds(j.endsAt); } else store.del(TRIAL_KEY);
+        setUnlocked(true);
+      })
+      .catch(() => {
+        // Offline with a passcode that worked before: let them keep working, unless it was a trial that has ended.
+        const ends = store.get(TRIAL_KEY, null);
+        if (ends && Date.now() >= new Date(ends).getTime()) return endTrial();
+        setTrialEnds(ends); setUnlocked(true);
+      });
   }, []);
+  // A trial user with the analyzer open when the trial ends gets locked out right then.
+  useEffect(() => {
+    if (!unlocked || !trialEnds) return;
+    const id = setInterval(() => { if (Date.now() >= new Date(trialEnds).getTime()) endTrial(); }, 60000);
+    return () => clearInterval(id);
+  }, [unlocked, trialEnds]);
   if (unlocked === null) return <div className="flex min-h-screen items-center justify-center text-sm text-slate-500">Loading...</div>;
-  if (!unlocked) return <Gate onUnlock={() => setUnlocked(true)} />;
-  return <Analyzer onLock={() => { store.del(PASS_KEY); setUnlocked(false); }} />;
+  if (!unlocked) return <Gate expired={expired} onUnlock={(j) => { setExpired(false); setTrialEnds(j && j.tier === "trial" ? j.endsAt : null); setUnlocked(true); }} />;
+  return <Analyzer trialEnds={trialEnds} onLock={() => { store.del(PASS_KEY); store.del(TRIAL_KEY); setTrialEnds(null); setUnlocked(false); }} />;
 }
 
-function Analyzer({ onLock }) {
+function Analyzer({ onLock, trialEnds }) {
   const [d, setD] = useState(() => cleanDeal(store.get(DRAFT_KEY, {})));
   const [deals, setDeals] = useState(() => store.get(DEALS_KEY, []));
   const [showSaved, setShowSaved] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
   const [savedMsg, setSavedMsg] = useState("");
   const [showFurnish, setShowFurnish] = useState(false);
   const [showCapex, setShowCapex] = useState(false);
@@ -272,6 +309,7 @@ function Analyzer({ onLock }) {
   // The final picture on a hard money deal: after the long-term plan pays off the hard money. Needs the ARV for a DSCR refinance.
   const finalRefi = a.hard && refi && !refi.missingValue ? refi : null;
   const h = a.headline;   // headline numbers: the final ones once the hard money is paid off
+  const pending = a.verdict.tone === "none";   // a required input is missing, so no headline numbers yet
   // Value check for bank, DSCR and FHA loans. A lender only lends a share of what the house is worth
   // (DSCR lenders about 75% to 80%, FHA up to 96.5%), so a loan bigger than that is not a real loan.
   const arvNum = num(d.arv);
@@ -310,6 +348,7 @@ function Analyzer({ onLock }) {
           </div>
           <div className="flex flex-wrap items-center gap-1.5">
             {savedMsg && <span className="text-[12px] font-semibold text-emerald-700">{savedMsg}</span>}
+            <button onClick={() => setShowHelp(true)} aria-label="How to use" className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700"><HelpCircle className="h-3.5 w-3.5" />How to use</button>
             <button onClick={saveDeal} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold text-white" style={{ background: BRAND }}><Save className="h-3.5 w-3.5" />Save<span className="hidden sm:inline"> deal</span></button>
             <button onClick={() => setShowSaved((s) => !s)} aria-label="My deals" className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700"><FolderOpen className="h-3.5 w-3.5" /><span className="hidden sm:inline">My deals </span>({deals.length})</button>
             <button onClick={startNew} aria-label="New deal" className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700"><FilePlus2 className="h-3.5 w-3.5" /><span className="hidden sm:inline">New</span></button>
@@ -339,6 +378,18 @@ function Analyzer({ onLock }) {
           </div>
         )}
       </header>
+      {showHelp && <HowToUse onClose={() => setShowHelp(false)} />}
+      {trialEnds && (() => {
+        const left = trialDaysLeft(trialEnds);
+        return (
+          <div className="border-b border-emerald-200 bg-emerald-50">
+            <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-2.5">
+              <p className="text-[13px] leading-snug text-emerald-900"><b>Free trial: {left <= 1 ? "last day" : `${left} days left`}.</b> Your trial runs through {trialLastDay(trialEnds)}. Join the Hobknob Co-Living Academy to keep using the analyzer. Your saved deals stay with you.</p>
+              <a href={JOIN_URL} target="_blank" rel="noopener" className="shrink-0 rounded-lg px-3 py-1.5 text-xs font-bold text-white" style={{ background: BRAND }}>Join the Academy</a>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Phones: the results sit below the form, so keep the headline numbers in view while typing. */}
       <a href="#results" className={`fixed inset-x-0 bottom-0 z-20 flex items-center justify-between gap-3 border-t-2 bg-white px-4 py-2.5 shadow-[0_-4px_12px_rgba(15,23,42,0.08)] lg:hidden ${tone === "pass" ? "border-rose-300" : tone === "thin" ? "border-amber-300" : tone === "none" ? "border-slate-200" : "border-emerald-400"}`}>
@@ -347,8 +398,8 @@ function Analyzer({ onLock }) {
           <span className="block text-[11px] text-slate-600">Tap for the full results</span>
         </span>
         <span className="shrink-0 text-right font-mono tabular-nums">
-          <span className={`block text-base font-bold ${h.cashFlow > 0 ? "text-emerald-700" : a.rentedCount ? "text-rose-600" : "text-slate-900"}`}>{fmt$(h.cashFlow)}/mo</span>
-          <span className="block text-[11px] text-slate-600">{type === "hack" ? (a.hack.yourCost <= 0 ? "you live free" : `${fmt$(a.hack.yourCost)} to live there`) : (h.cashIn <= 0 && h.cashFlow > 0 ? `${INF} cash-on-cash` : `${pct(h.coc)} cash-on-cash`)}</span>
+          <span className={`block text-base font-bold ${pending ? "text-slate-400" : h.cashFlow > 0 ? "text-emerald-700" : a.rentedCount ? "text-rose-600" : "text-slate-900"}`}>{pending ? "--" : `${fmt$(h.cashFlow)}/mo`}</span>
+          <span className="block text-[11px] text-slate-600">{pending ? "numbers show once it is filled in" : type === "hack" ? (a.hack.yourCost <= 0 ? "you live free" : `${fmt$(a.hack.yourCost)} to live there`) : (h.cashIn <= 0 && h.cashFlow > 0 ? `${INF} cash-on-cash` : `${pct(h.coc)} cash-on-cash`)}</span>
         </span>
       </a>
 
@@ -733,8 +784,9 @@ function Analyzer({ onLock }) {
           </div>
 
           <div className="grid grid-cols-2 gap-2">
-            <Stat label="Monthly cash flow" value={fmt$(h.cashFlow)} tone={h.cashFlow > 0 ? "good" : a.rentedCount ? "bad" : "default"} big sub={h.cfPerRoom != null ? `${fmt$(h.cfPerRoom)} per room${h.isFinal ? ", after the hard money is paid off" : ""}` : null} />
-            {type === "hack"
+            {pending ? <Stat label="Monthly cash flow" value="--" big sub={a.verdict.label} /> : <Stat label="Monthly cash flow" value={fmt$(h.cashFlow)} tone={h.cashFlow > 0 ? "good" : a.rentedCount ? "bad" : "default"} big sub={h.cfPerRoom != null ? `${fmt$(h.cfPerRoom)} per room${h.isFinal ? ", after the hard money is paid off" : ""}` : null} />}
+            {pending ? <Stat label={type === "hack" ? "Your housing cost" : "Cash-on-cash"} value="--" big sub={a.verdict.label} />
+              : type === "hack"
                 ? <Stat label="Your housing cost" value={a.hack.yourCost <= 0 ? "$0" : fmt$(a.hack.yourCost)} big sub={a.hack.yourCost <= 0 ? `and you are paid ${fmt$(-a.hack.yourCost)}` : "per month to live there"} tone={a.hack.yourCost <= 0 ? "good" : "warn"} />
                 : (() => { const v = a.rentedCount ? cocView(h.coc, h.cashIn, h.cashFlow, h.paybackMonths) : { value: pct(h.coc), sub: "yearly cash flow / cash in", tone: null };
                     return <Stat label="Cash-on-cash" value={v.value} big sub={v.sub} tone={v.tone || (h.coc >= TARGETS.cocSolid ? "good" : h.coc > 0 ? "warn" : a.rentedCount ? "bad" : "default")} />; })()}
@@ -769,7 +821,7 @@ function Analyzer({ onLock }) {
             {a.taxesMo > 0 && <Row label="Property taxes" value={`-${fmt$(a.taxesMo)}`} />}
             {a.insMo > 0 && <Row label="Insurance" value={`-${fmt$(a.insMo)}`} />}
             <Row label="Operating costs" value={`-${fmt$(a.opex - a.mgmt)}`} />
-            {a.mgmt > 0 && <Row label="Management" value={`-${fmt$(a.mgmt)}`} />}
+            {a.mgmt > 0 && <Row label="Property management" value={`-${fmt$(a.mgmt)}`} />}
             <Row label="Net operating income" value={fmt$(a.noi)} strong />
             {finalRefi ? (<>
               {/* Hard money deal with a long-term plan: show the final numbers, after the hard money is paid off. */}
@@ -847,6 +899,59 @@ function Analyzer({ onLock }) {
           <button onClick={onLock} className="flex w-full items-center justify-center gap-2 rounded-lg border-2 border-slate-300 bg-white px-3 py-2.5 text-sm font-bold text-slate-700 transition hover:border-slate-500 hover:bg-slate-50"><Lock className="h-4 w-4" />Lock the analyzer</button>
         </aside>
       </main>
+    </div>
+  );
+}
+
+// "How to use" guide, opened from the header. Keep it in step with the step order in CLAUDE.md.
+function HowToUse({ onClose }) {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  const steps = [
+    ["Address", "Optional. Type the address and pick it from the list. Look up confirms it and gives you links to find the beds, baths, square feet and taxes."],
+    ["1. What kind of deal is it?", "Pick Buy & Convert, Creative Buy or House Hack. Then pick how you will rent it: Co-Living by the room, Private units, or Hybrid."],
+    ["2. The property", "Bedrooms, bathrooms and square feet as it sits today, and the bathrooms it will have once it is set up."],
+    ["3. Rent and income", "List every rentable bedroom or unit after the conversion and what each one rents for, furnished with utilities included. Also enter the traditional whole-house rent. Most lenders qualify the loan on that number, not on room rents."],
+    ["4. Getting it ready", "How many months until it is rented, the renovation items and the furnishing. Open each section to fill it in. Furnishing also takes your own total if you already have one."],
+    ["5. Monthly operating costs", "These start with Hobknob's 12-month averages for a 5-bedroom co-living home. Change any of them to match your house and market."],
+    ["6. Buying it", "The price, the loan and the after-repair value. The price and the after-repair value are both required, so there are no numbers and no verdict until they are in. If you use hard money, pick your long-term plan to pay it off."],
+    ["7. 5-year assumptions", "Appreciation and taxes for the 5-year return. It does not show for hard money, because that loan comes due."],
+  ];
+  const results = [
+    ["The verdict", `Strong, Solid, Thin or Pass, based on cash-on-cash: ${TARGETS.cocStrong}% or more is strong, ${TARGETS.cocSolid}% is solid, ${TARGETS.cocThin}% is thin.`],
+    ["Cash flow and cash-on-cash", "What the house makes each month after every cost, and that yearly cash flow compared to the cash you put in. On hard money deals these are the numbers after the hard money is paid off."],
+    ["Lender DSCR", `The traditional rent divided by the loan payment with taxes and insurance. Most lenders want ${TARGETS.dscrMin} or higher.`],
+    ["What it takes", "Set a target cash-on-cash and it shows the average rent, or the most you can pay, to hit it."],
+  ];
+  const tools = [
+    ["Your work saves as you type", "It stays in this browser. Save deal keeps a copy under My deals so you can come back to it."],
+    ["New", "Starts a blank deal and clears the form, so save first if you want to keep the one you have."],
+    ["Report", "Downloads a one-page summary of the deal to share or print."],
+    ["Contractor documents", "Print a Scope of Work, Punch List and Rehab Estimate built from this deal. Type over any text to change it."],
+    ["Before you commit", "A checklist of what to confirm for your deal type before you make an offer."],
+    ["The ⓘ icons", "Tap one next to any field for a quick explanation."],
+  ];
+  const List = ({ items }) => (
+    <ul className="space-y-2">
+      {items.map(([t, x]) => <li key={t} className="text-[13px] leading-snug text-slate-700"><b className="text-slate-900">{/[?.]$/.test(t) ? t : `${t}.`}</b> {x}</li>)}
+    </ul>
+  );
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/50 p-4 sm:items-center" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }} role="dialog" aria-modal="true" aria-label="How to use the analyzer">
+      <div className="relative w-full max-w-2xl rounded-2xl bg-white p-5 shadow-xl sm:p-6">
+        <button onClick={onClose} aria-label="Close" className="absolute right-3 top-3 rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-800"><X className="h-5 w-5" /></button>
+        <h2 className="pr-8 text-lg font-extrabold text-slate-900">How to use the analyzer</h2>
+        <p className="mt-1 text-[13px] leading-snug text-slate-600">Fill in the steps from top to bottom. The results update as you type. They sit on the right on a computer, and below the form on a phone. Every number is an estimate, so check it with your lender, contractor and local market before you make an offer.</p>
+        <div className="mt-4 space-y-5">
+          <div><div className="mb-2 text-[11px] font-bold uppercase tracking-wide" style={{ color: BRAND }}>The steps</div><List items={steps} /></div>
+          <div><div className="mb-2 text-[11px] font-bold uppercase tracking-wide" style={{ color: BRAND }}>Reading the results</div><List items={results} /></div>
+          <div><div className="mb-2 text-[11px] font-bold uppercase tracking-wide" style={{ color: BRAND }}>Saving and other tools</div><List items={tools} /></div>
+        </div>
+        <button onClick={onClose} className="mt-5 w-full rounded-lg px-4 py-2.5 text-sm font-bold text-white" style={{ background: BRAND }}>Got it</button>
+      </div>
     </div>
   );
 }
@@ -1068,7 +1173,7 @@ ${a.hack ? row("Your monthly housing cost", fmt$(Math.max(0, a.hack.yourCost))) 
 <h2>Monthly</h2><table>
 ${row("Rent at 100%", fmt$(a.grossRent))}${row(`Income at ${pct(a.occ * 100)} occupancy`, fmt$(a.effectiveIncome))}
 ${a.taxesMo ? row("Taxes", `-${fmt$(a.taxesMo)}`) : ""}${a.insMo ? row("Insurance", `-${fmt$(a.insMo)}`) : ""}
-${a.opexLines.filter((l) => l.amt).map((l) => row(l.label, `-${fmt$(l.amt)}`)).join("")}${a.mgmt ? row("Management", `-${fmt$(a.mgmt)}`) : ""}
+${a.opexLines.filter((l) => l.amt).map((l) => row(l.label, `-${fmt$(l.amt)}`)).join("")}${a.mgmt ? row("Property management", `-${fmt$(a.mgmt)}`) : ""}
 ${row("Net operating income", fmt$(a.noi))}${hl.isFinal ? `${hl.refi.payment > 0 ? row("New loan payment", `-${fmt$(hl.refi.payment)}`) : ""}${a.setupLoan && !a.setupLoan.payAtRefi ? row("Furnishing and holding loan", `-${fmt$(a.setupLoan.payment)}`) : ""}${row("Cash flow", fmt$(hl.cashFlow))}` : `${a.debtService ? row("Debt payments", `-${fmt$(a.debtService)}`) : ""}${row("Cash flow", fmt$(a.cashFlow))}`}</table>
 <h2>Cash needed</h2><table>${a.cashInLines.map((l) => row(l.label, fmt$(l.amt))).join("")}${row("Total", fmt$(a.cashIn))}</table>
 <h2>Rents</h2><div style="font-size:13px">${esc(rents || "none entered")}</div>
