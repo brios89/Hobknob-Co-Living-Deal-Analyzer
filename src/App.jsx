@@ -465,11 +465,11 @@ function Analyzer({ onLock, trialEnds }) {
                       <div className="mb-0.5 flex items-center justify-between text-[11px] text-slate-600"><span>Room {i + 1}</span>
                         {type === "hack" && <button type="button" onClick={() => setOwner("rooms", i)} className={`rounded px-1.5 text-[10px] font-bold ${r.owner ? "bg-emerald-600 text-white" : "bg-slate-100 text-slate-600"}`}>{r.owner ? "You live here" : "I live here"}</button>}
                       </div>
-                      <Money value={r.rent} onChange={(v) => setRent("rooms", i, v)} placeholder="799" />
+                      <Money value={r.rent} onChange={(v) => setRent("rooms", i, v)} placeholder="rent" />
                     </div>
                   ))}
                 </div>
-                <p className="mt-2 text-[11.5px] text-slate-600">Find room rents near the property on Facebook Marketplace, Furnished Finder, PadSplit and Roomster. Price bigger rooms and rooms with a private bath higher.</p>
+                <p className="mt-2 text-[11.5px] text-slate-600">Find room rents near the property on Facebook Marketplace, Furnished Finder, PadSplit, Roomster and Airbnb. Price bigger rooms and rooms with a private bath higher.</p>
               </div>
             )}
             {showUnits && (
@@ -481,7 +481,7 @@ function Analyzer({ onLock, trialEnds }) {
                       <div className="mb-0.5 flex items-center justify-between text-[11px] text-slate-600"><span>Unit {i + 1}</span>
                         {type === "hack" && <button type="button" onClick={() => setOwner("units", i)} className={`rounded px-1.5 text-[10px] font-bold ${u.owner ? "bg-emerald-600 text-white" : "bg-slate-100 text-slate-600"}`}>{u.owner ? "You live here" : "I live here"}</button>}
                       </div>
-                      <Money value={u.rent} onChange={(v) => setRent("units", i, v)} placeholder="1599" />
+                      <Money value={u.rent} onChange={(v) => setRent("units", i, v)} placeholder="rent" />
                     </div>
                   ))}
                 </div>
@@ -790,10 +790,10 @@ function Analyzer({ onLock, trialEnds }) {
                 ? <Stat label="Your housing cost" value={a.hack.yourCost <= 0 ? "$0" : fmt$(a.hack.yourCost)} big sub={a.hack.yourCost <= 0 ? `and you are paid ${fmt$(-a.hack.yourCost)}` : "per month to live there"} tone={a.hack.yourCost <= 0 ? "good" : "warn"} />
                 : (() => { const v = a.rentedCount ? cocView(h.coc, h.cashIn, h.cashFlow, h.paybackMonths) : { value: pct(h.coc), sub: "yearly cash flow / cash in", tone: null };
                     return <Stat label="Cash-on-cash" value={v.value} big sub={v.sub} tone={v.tone || (h.coc >= TARGETS.cocSolid ? "good" : h.coc > 0 ? "warn" : a.rentedCount ? "bad" : "default")} />; })()}
-            <Stat label="Cash needed" value={fmt$(a.cashIn)} sub="to buy, set up and fill it" />
+            <Stat label="Cash needed" value={pending ? "--" : fmt$(a.cashIn)} sub="to buy, set up and fill it" />
             {finalRefi && <Stat label="Cash left in the deal" value={fmt$(Math.max(0, h.cashIn))} sub={h.cashIn <= 0 ? (finalRefi.cashLeftIn <= -1 ? `all your cash is back out, plus ${fmt$(Math.abs(finalRefi.cashLeftIn))}` : "all your cash is back out") : "after the hard money is paid off"} />}
             {finalRefi && finalRefi.payment > 0 && <Stat label="New loan payment" value={fmt$(finalRefi.payment)} sub={`${finalRefi.io ? "per month, interest only" : `per month, ${finalRefi.years} years`}. ${fmt$(finalRefi.pitia)} with taxes and insurance`} />}
-            {!finalRefi && <Stat label="Cost per rentable room" value={fmt$(a.costPerRoom)} sub="price + renovation / rooms" />}
+            {!finalRefi && <Stat label="Cost per rentable room" value={pending ? "--" : fmt$(a.costPerRoom)} sub="price + renovation / rooms" />}
             {a.hard ? (() => {
               // Hard money lenders do not use DSCR. The DSCR that matters is the long-term DSCR loan, sized on the after-repair value.
               const rentWord = model === "private" ? "traditional" : "whole-house";
@@ -806,7 +806,7 @@ function Analyzer({ onLock, trialEnds }) {
             })() : <Stat label="Lender DSCR" value={!(arvNum > 0) && bankLoan ? "--" : a.dscr ? a.dscr.toFixed(2) : "--"}
               sub={!(arvNum > 0) && bankLoan ? "Enter the after-repair value in step 6. Lenders size the loan on what the house is worth." : a.dscr ? `${model === "private" ? "traditional" : "whole-house"} rent / loan payment with taxes and insurance. Most want ${TARGETS.dscrMin}+${a.dscrRoom ? `. Using your furnished rents: ${a.dscrRoom.toFixed(2)}` : ""}` : `Enter the ${model === "private" ? "traditional" : "whole-house"} rent in step 3. Most lenders use that, not room rents.`}
               tone={loanTooBig || (!(arvNum > 0) && bankLoan) ? "bad" : a.dscr == null ? "default" : a.dscr >= TARGETS.dscrMin ? "good" : "warn"} />}
-            {finalRefi && <Stat label="Cost per rentable room" value={fmt$(a.costPerRoom)} sub="price + renovation / rooms" />}
+            {finalRefi && <Stat label="Cost per rentable room" value={pending ? "--" : fmt$(a.costPerRoom)} sub="price + renovation / rooms" />}
             {loanTooBig && <div className="col-span-2 -mt-1 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[11.5px] leading-snug text-rose-900">The DSCR only compares rent to the payment. It does not check value. At the after-repair value you entered, a lender would not make this loan. See step 6.</div>}
             <Stat label="Break-even occupancy" value={h.breakEvenOcc != null ? pct(h.breakEvenOcc) : "--"} sub="rented share needed to cover every cost" tone={h.breakEvenOcc == null ? "default" : h.breakEvenOcc <= 80 ? "good" : h.breakEvenOcc <= 92 ? "warn" : "bad"} />
             {type === "hack" && (() => { const v = a.rentedCount ? cocView(a.coc, a.cashIn, a.cashFlow, a.paybackMonths) : { value: pct(a.coc), sub: "yearly cash flow / cash in" }; return <Stat label="Cash-on-cash" value={v.value} sub={v.sub} />; })()}

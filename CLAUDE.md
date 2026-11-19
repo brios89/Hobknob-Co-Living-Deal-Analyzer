@@ -4,7 +4,7 @@
 - Brian Rios ("B"), founder of Hobknob Mid-Term Rentals and the Hobknob Co-Living Academy. He calls his AI "Ace."
 - Direct, honest pushback over polite agreement. Plain English, analogies welcome.
 - HARD RULE: never guess. Read the actual code before answering or editing, and prove a change works before calling it done.
-- Copy rules: no em dashes or semicolons in UI text. Never make guarantees. Hobknob co-living homes are for "gentlemen" or "ladies," never "male" or "female." No outside course or company names in the UI.
+- Copy rules: no em dashes or semicolons in UI text. Never make guarantees. Hobknob co-living homes are for "gentlemen" or "ladies," never "male" or "female." No outside course or company names in the UI. Exception (Brian, Nov 2026): the rental sites named in the rent tips in step 3 (Facebook Marketplace, Furnished Finder, PadSplit, Roomster, Airbnb) are fine.
 
 ## What this app is
 A deal analyzer for Academy students. Students type the property facts and rents, the app does the math. No property-data APIs, so nothing bills per lookup.
